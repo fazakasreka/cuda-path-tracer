@@ -19,270 +19,15 @@
 #include <sstream>
 #include <algorithm>
 #include <list>
-#include "HDRLoader.h"
 #include <chrono>
 #include <queue> 
 
 
-//copy single data
-template <typename T>
-void copyToCuda(T* &device_pointer, T &data, const char* errorMessage) {
-	cudaError_t cudaStatus = cudaMalloc((void**)&device_pointer, sizeof(T));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed! \n");
-	}
+#include "HDRLoader/HDRLoader.h"
+#include "copyToDevice/copyToDevice.h"
+#include "math/math.cuh"
+#include "constants/constants.cuh"
 
-	cudaStatus = cudaMemcpy(device_pointer, &data, sizeof(T), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "%s cudaMemcpy failed! %s \n", errorMessage, cudaGetErrorString(cudaStatus));
-	}
-
-}
-
-//copy array of data
-template <typename T>
-void copyToCuda(T* &device_pointer, T* data, int size, const char* errorMessage) {
-	cudaError_t cudaStatus = cudaMalloc((void**)&device_pointer, size * sizeof(T));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed! \n");
-	}
-
-	cudaStatus = cudaMemcpy(device_pointer, data, size * sizeof(T), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "%s cudaMemcpy failed! %s \n", errorMessage, cudaGetErrorString(cudaStatus));
-	}
-
-}
-
-//copy std:vector data
-template <typename T>
-void copyToCuda(T*& device_pointer, std::vector<T*> data, int size, const char* errorMessage) {
-	cudaError_t cudaStatus = cudaMalloc((void**)&device_pointer, size * sizeof(T));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed! \n");
-	}
-
-	T* t_array = new T[size];
-	for (int i = 0; i < size; i++){
-		t_array[i] = *data[i];
-	}
-
-	cudaStatus = cudaMemcpy(device_pointer, t_array, size * sizeof(T), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "%s cudaMemcpy failed! %s \n", errorMessage, cudaGetErrorString(cudaStatus));
-	}
-
-	delete t_array;
-}
-
-__constant__ const unsigned int screenWidth = 1024, screenHeight = 1024;	// resolution of the rendered image
-__constant__ const double epsilon = 1e-5;	// limit of considering a number to be zero
-__constant__ const int maxdepth = 3;		// max depth of recursion
-__constant__ const int nSamples = 50;		// number of path samples per pixel
-__constant__ float PI = 3.1415f;
-
-__constant__ const int maxTriangleNum = 50; 
-__constant__ const int maxKdTreeHeight= 15;
-__constant__ const int allowedtriangleDifference = 20;
-__constant__ const int triangleOptimumSearchMaxDepth = 20;
-__constant__ const int tileSize = 16;
-__constant__ const int tileArea = tileSize * tileSize;
-
-enum Axis { Axis_X, Axis_Y, Axis_Z };
-__host__ __device__ Axis nextAxis(Axis axis) {
-	if (axis == Axis_X) return Axis_Y;
-	if (axis == Axis_Y) return Axis_Z;
-	if (axis == Axis_Z) return Axis_X;
-}
-
-// 3D vector operations
-struct vec3 {
-	double x, y, z;
-	__host__ __device__ vec3(double x0 = 0, double y0 = 0, double z0 = 0) { x = x0; y = y0; z = z0; }
-	__host__ __device__ vec3 operator*(double a) const { return vec3(x * a, y * a, z * a); }
-	__host__ __device__ vec3 operator/(double d) const { return vec3(x / d, y / d, z / d); }
-	__host__ __device__ vec3 operator+(const vec3& v) const { return vec3(x + v.x, y + v.y, z + v.z); }
-	__host__ __device__ void operator+=(const vec3& v) { x += v.x; y += v.y; z += v.z; }
-	__host__ __device__ vec3 operator-(const vec3& v) const { return vec3(x - v.x, y - v.y, z - v.z); }
-	__host__ __device__ vec3 operator*(const vec3& v) const { return vec3(x * v.x, y * v.y, z * v.z); }
-	__host__ __device__ vec3 operator-() const { return vec3(-x, -y, -z); }
-	__host__ __device__ vec3 normalize() const { return (*this) * (1 / (length() + epsilon)); }
-	__host__ __device__ double length() const { return sqrt(x * x + y * y + z * z); }
-	__host__ __device__ double average() { return (x + y + z) / 3; }
-	__host__ __device__ float axisCoordinate(Axis axis) {
-		if (axis == Axis_X) return x;
-		if (axis == Axis_Y) return y;
-		if (axis == Axis_Z) return z;
-	}
-};
-
-
-__host__ __device__ double dot(const vec3& v1, const vec3& v2) {	// dot product
-	return (v1.x * v2.x + v1.y * v2.y + v1.z * v2.z);
-}
-
-__host__ __device__ vec3 cross(const vec3& v1, const vec3& v2) {	// cross product
-	return vec3(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x);
-}
-
-//4D vector
-struct vec4 {
-	//--------------------------
-	float x, y, z, w;
-
-	__host__ __device__ vec4(float x0 = 0, float y0 = 0, float z0 = 0, float w0 = 0) { x = x0; y = y0; z = z0; w = w0; }
-	__host__ __device__ vec4(vec3 vec3, float w0 = 0) { x = vec3.x; y = vec3.z; z = vec3.y; w = w0; }
-	__host__ __device__ float& operator[](int j) { return *(&x + j); }
-	__host__ __device__ float operator[](int j) const { return *(&x + j); }
-	__host__ __device__ vec3 xyz() {
-		return vec3(this->x, this->y, this->z);
-	}
-
-	__host__ __device__ vec4 operator*(float a) const { return vec4(x * a, y * a, z * a, w * a); }
-	__host__ __device__ vec4 operator/(float d) const { return vec4(x / d, y / d, z / d, w / d); }
-	__host__ __device__ vec4 operator+(const vec4& v) const { return vec4(x + v.x, y + v.y, z + v.z, w + v.w); }
-	__host__ __device__ vec4 operator-(const vec4& v)  const { return vec4(x - v.x, y - v.y, z - v.z, w - v.w); }
-	__host__ __device__ vec4 operator*(const vec4& v) const { return vec4(x * v.x, y * v.y, z * v.z, w * v.w); }
-	__host__ __device__ void operator+=(const vec4 right) { x += right.x; y += right.y; z += right.z; w += right.w; }
-};
-
-__host__ __device__ float dot(const vec4& v1, const vec4& v2) {
-	return (v1.x * v2.x + v1.y * v2.y + v1.z * v2.z + v1.w * v2.w);
-}
-
-__host__ __device__  vec4 operator*(float a, const vec4& v) {
-	return vec4(v.x * a, v.y * a, v.z * a, v.w * a);
-}
-
-//mat4
-//---------------------------
-struct mat4 { // row-major matrix 4x4
-//---------------------------
-	vec4 rows[4];
-public:
-	__host__ __device__ mat4() {}
-	__host__ __device__ mat4(float m00, float m01, float m02, float m03,
-		float m10, float m11, float m12, float m13,
-		float m20, float m21, float m22, float m23,
-		float m30, float m31, float m32, float m33) {
-		rows[0][0] = m00; rows[0][1] = m01; rows[0][2] = m02; rows[0][3] = m03;
-		rows[1][0] = m10; rows[1][1] = m11; rows[1][2] = m12; rows[1][3] = m13;
-		rows[2][0] = m20; rows[2][1] = m21; rows[2][2] = m22; rows[2][3] = m23;
-		rows[3][0] = m30; rows[3][1] = m31; rows[3][2] = m32; rows[3][3] = m33;
-	}
-	__host__ __device__ mat4(vec4 it, vec4 jt, vec4 kt, vec4 ot) {
-		rows[0] = it; rows[1] = jt; rows[2] = kt; rows[3] = ot;
-	}
-
-	__host__ __device__ vec4& operator[](int i) { return rows[i]; }
-	__host__ __device__ vec4 operator[](int i) const { return rows[i]; }
-	__host__ __device__ operator float* () const { return (float*)this; }
-
-	mat4 inverse() {
-		mat4 I = mat4(
-			1, 0, 0, 0,
-			0, 1, 0, 0,
-			0, 0, 1, 0,
-			0, 0, 0, 1
-
-		);
-		mat4 M = mat4(
-			rows[0][0], rows[0][1], rows[0][2], rows[0][3],
-			rows[1][0], rows[1][1], rows[1][2], rows[1][3],
-			rows[2][0], rows[2][1], rows[2][2], rows[2][3],
-			rows[3][0], rows[3][1], rows[3][2], rows[3][3]
-		);
-
-		bool usedcolumns[4] = { false, false, false, false };
-		for (int rowIdx = 0; rowIdx < 4; rowIdx++) {
-			//column
-			int columnIdx = -1;
-			for (int m = 0; m < 4; m++) {
-				if ((M[rowIdx][m] > epsilon || M[rowIdx][m] < -epsilon) && !usedcolumns[m]) {
-					usedcolumns[m] = true;
-					columnIdx = m;
-					break;
-				}
-			}
-			if (columnIdx == -1) {
-				//throw ("Mtx bad");
-			}
-
-			//[row][column] = 1
-			float factor = M[rowIdx][columnIdx];
-			for (int j = 0; j < 4; j++) {
-				M[rowIdx][j] = M[rowIdx][j] / factor;
-				I[rowIdx][j] = I[rowIdx][j] / factor;
-			}
-
-			//zeroing the column
-			for (int j = 0; j < 4; j++) {
-				if (rowIdx == j) continue;
-				float coefficient = M[j][columnIdx];
-				for (int k = 0; k < 4; k++) {
-					M[j][k] -= coefficient * M[rowIdx][k];
-					I[j][k] -= coefficient * I[rowIdx][k];
-				}
-			}
-		}
-		return I;
-	}
-
-	mat4 transpose() {
-		return mat4(
-			rows[0][0], rows[1][0], rows[2][0], rows[3][0],
-			rows[0][1], rows[1][1], rows[2][1], rows[3][1],
-			rows[0][2], rows[1][2], rows[2][2], rows[3][2],
-			rows[0][3], rows[1][3], rows[2][3], rows[3][3]
-		);
-
-	}
-
-};
-
-
-__host__ __device__ vec4 operator*(const vec4& v, const mat4& mat) {
-	return v[0] * mat[0] + v[1] * mat[1] + v[2] * mat[2] + v[3] * mat[3];
-}
-
-__host__ __device__ mat4 operator*(const mat4& left, const mat4& right) {
-	mat4 result;
-	for (int i = 0; i < 4; i++) result.rows[i] = left.rows[i] * right;
-	return result;
-}
-
-__host__ __device__ mat4 TranslateMatrix(vec3 t) {
-	return mat4(vec4(1, 0, 0, 0),
-		vec4(0, 1, 0, 0),
-		vec4(0, 0, 1, 0),
-		vec4(t.x, t.y, t.z, 1));
-}
-
-__host__ __device__ mat4 ScaleMatrix(vec3 s) {
-	return mat4(
-		vec4(s.x, 0, 0, 0),
-		vec4(0, s.y, 0, 0),
-		vec4(0, 0, s.z, 0),
-		vec4(0, 0, 0, 1));
-}
-
-__host__ __device__ mat4 RotationMatrix(float angle, vec3 w) {
-	float c = cosf(angle), s = sinf(angle);
-	w = w.normalize();
-	return mat4(
-		vec4(c * (1.0f - w.x * w.x) + w.x * w.x, w.x * w.y * (1.0f - c) + w.z * s, w.x * w.z * (1 - c) - w.y * s, 0),
-		vec4(w.x * w.y * (1 - c) - w.z * s, c * (1 - w.y * w.y) + w.y * w.y, w.y * w.z * (1 - c) + w.x * s, 0),
-		vec4(w.x * w.z * (1 - c) + w.y * s, w.y * w.z * (1 - c) - w.x * s, c * (1 - w.z * w.z) + w.z * w.z, 0),
-		vec4(0, 0, 0, 1));
-}
-
-mat4 SRTmtx(vec3 scale, vec3 rotation, vec3 translate) {
-	return ScaleMatrix(scale)
-		* RotationMatrix(rotation.x, vec3(1, 0, 0))
-		* RotationMatrix(rotation.y, vec3(0, 1, 0))
-		* RotationMatrix(rotation.z, vec3(0, 0, 1))
-		* TranslateMatrix(translate);
-}
 
 // Pseudo-random number in [0,1)
 //__host__ __device__ double random() { return (double)rand() / RAND_MAX; }
@@ -382,7 +127,7 @@ protected:
 public:
 	Intersectable() {}
 	Intersectable(Material* mat) { 
-		copyToCuda(material, *mat, "material");
+		copyToDevice(material, *mat, "material");
 	}
 };
 
@@ -747,8 +492,8 @@ struct Node {
 	void makeNodeTree(std::vector<Triangle*> triangles, int depth=0) {
 		if (triangles.size() <= maxTriangleNum || depth > maxKdTreeHeight) {
 			int size = triangles.size();
-			copyToCuda(device_triangles_size, size, "device_triangles_size");
-			copyToCuda(device_triangles, triangles, size, "device_triangles");
+			copyToDevice(device_triangles_size, size, "device_triangles_size");
+			copyToDevice(device_triangles, triangles, size, "device_triangles");
 			return;
 		}
 		left = new Node();
@@ -904,7 +649,7 @@ struct Mesh {
 	void uploadKdTree(Node* kdTree) {
 		//save size
 		int size = kdTree->getSize();
-		copyToCuda(device_kdTreeSize, size, "device_kdTreeSize");
+		copyToDevice(device_kdTreeSize, size, "device_kdTreeSize");
 
 		Node *host_kdTree = new Node[size];
 
@@ -928,7 +673,7 @@ struct Mesh {
 			idx++;
 		}
 		//upload to CUDA
-		copyToCuda(device_kdTree, host_kdTree, size, "device_kdTree");
+		copyToDevice(device_kdTree, host_kdTree, size, "device_kdTree");
 	}
 
 	void putNodeToIdx(Node* currentNode, Node* array, int idx) {
@@ -1119,7 +864,7 @@ struct MeshObject : public Intersectable {
 		this->positon = position;
 		this->scale = scale;
 		this->rotate = rotate;
-		copyToCuda(device_mesh, *mesh, "device_mesh");
+		copyToDevice(device_mesh, *mesh, "device_mesh");
 	}
 
 	__device__ Hit intersect(const Ray& ray) {
@@ -1148,12 +893,12 @@ class EnvMap {
 	void copyHDRToCuda(HDRLoaderResult &cpu_result, HDRLoaderResult* &device_result) {
 		//change cols to CUDA cols
 		float* device_cols;
-		copyToCuda(device_cols, cpu_result.cols, cpu_result.size(), "HDR.cols");
+		copyToDevice(device_cols, cpu_result.cols, cpu_result.size(), "HDR.cols");
 		delete cpu_result.cols;
 		cpu_result.cols = device_cols;
 
 		//copy to CUDA
-		copyToCuda(device_result, cpu_result, "HDR");
+		copyToDevice(device_result, cpu_result, "HDR");
 	}
 public:
 	EnvMap(std::string folderName) {
@@ -1224,8 +969,8 @@ public:
 		lookat = _lookat;
 		vec3 w = eye - lookat;
 		double f = w.length();
-		right = cross(vup, w).normalize() * f * tan(fov / 2);	// orthogonalization
-		up = cross(w, right).normalize() * f * tan(fov / 2);
+		right = cross(vup, w).normalize() * f * tanf(fov / 2.0f);	// orthogonalization
+		up = cross(w, right).normalize() * f * tanf(fov / 2.0f);
 	}
 	__host__ __device__ Ray getRay(double X, double Y) {	// integer parts of X, Y define the pixel, fractional parts the point inside pixel
 		vec3 dir = lookat + right * (2.0 * X / screenWidth - 1) + up * (2.0 * Y / screenHeight - 1) - eye;
@@ -1307,7 +1052,7 @@ public:
 
 		//LIGHTS
 		int light_size = 1;
-		copyToCuda(device_lights_size, light_size, "device_lights_size");
+		copyToDevice(device_lights_size, light_size, "device_lights_size");
 
 		Light* lights = new Light[light_size]; 
 		lights[0] = Light(vec3(0, -4, -4.5), vec3(1000, 1000, 1000));
@@ -1316,25 +1061,25 @@ public:
 		//lights[2] = Light(vec3(0, 2, -2), vec3(2000, 2000, 2000));
 		//lights[3] = Light(vec3(0, 6, 2), vec3(2000, 2000, 2000));
 
-		copyToCuda(device_lights, lights, light_size, "device_lights");
+		copyToDevice(device_lights, lights, light_size, "device_lights");
 
 		delete lights;
 
 		//SPHERE
 		int spheres_size = 0;
-		copyToCuda(device_sphere_size, spheres_size, "device_sphere_size");
+		copyToDevice(device_sphere_size, spheres_size, "device_sphere_size");
 
 		Sphere* spheres = new Sphere[spheres_size];
 		//spheres[0] = Sphere(vec3(0, 0, 0), 10, new Material(vec3(0.2,0.9,0.2), vec3(0,0,0)));
 		//spheres[1] = Sphere(vec3(-1.5, 0, 0), 0.6, new Material(vec3(0, 0, 0), vec3(1, 1, 1)));
 
-		copyToCuda(device_spheres, spheres, spheres_size, "device_spheres");
+		copyToDevice(device_spheres, spheres, spheres_size, "device_spheres");
 
 		delete spheres;
 
 		//PLANES
 		int planes_size = 6;
-		copyToCuda(device_plane_size, planes_size, "device_plane_size");
+		copyToDevice(device_plane_size, planes_size, "device_plane_size");
 
 		Plane* planes = new Plane[planes_size];
 		planes[0] = Plane(vec3(0, -5, 0), vec3(0, 1, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0,0.0, 0.0)));
@@ -1344,13 +1089,13 @@ public:
 		planes[4] = Plane(vec3(-5, 0, 0), vec3(1, 0, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
 		planes[5] = Plane(vec3(0, 5, 0), vec3(0, 1, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
 
-		copyToCuda(device_planes, planes, planes_size, "device_planes");
+		copyToDevice(device_planes, planes, planes_size, "device_planes");
 
 		delete planes;
 
 		//RINGS
 		int rings_size = 0;
-		copyToCuda(device_ring_size, rings_size, "device_plane_size");
+		copyToDevice(device_ring_size, rings_size, "device_plane_size");
 
 		Ring* rings = new Ring[rings_size];
 		//rings[0] = Ring(
@@ -1361,13 +1106,13 @@ public:
 		//	new Material(vec3(0.0, 0.0, 0.0), vec3(0.9, 0.9, 0.9))
 		//);
 
-		copyToCuda(device_rings, rings, rings_size, "device_rings");
+		copyToDevice(device_rings, rings, rings_size, "device_rings");
 
 		delete rings;
 
 		//MESHES
 		int mesh_size = 3;
-		copyToCuda(device_meshes_size, mesh_size, "device_meshes_size");
+		copyToDevice(device_meshes_size, mesh_size, "device_meshes_size");
 
 		MeshObject* meshes = new MeshObject[mesh_size];
 
@@ -1402,7 +1147,7 @@ public:
 			new Material(vec3(0.0, 0.2196, 0.6588), vec3(0.0, 0.0, 0.0))
 		);
 
-		copyToCuda(device_meshes, meshes, mesh_size, "device_meshes");
+		copyToDevice(device_meshes, meshes, mesh_size, "device_meshes");
 
 		delete meshes;
 	}
