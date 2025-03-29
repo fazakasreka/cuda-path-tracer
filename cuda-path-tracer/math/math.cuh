@@ -13,7 +13,7 @@ __host__ __device__ inline Axis nextAxis(Axis axis) {
 // 3D vector operations
 struct vec3 {
 	float x, y, z;
-	__host__ __device__ inline vec3(float x0 = 0, float y0 = 0, float z0 = 0) { x = x0; y = y0; z = z0; }
+	__host__ __device__ inline vec3(float x0 = 0.0f, float y0 = 0.0f, float z0 = 0.0f) { x = x0; y = y0; z = z0; }
 	__host__ __device__ inline vec3 operator*(float a) const { return vec3(x * a, y * a, z * a); }
 	__host__ __device__ inline vec3 operator/(float d) const { return vec3(x / d, y / d, z / d); }
 	__host__ __device__ inline vec3 operator+(const vec3& v) const { return vec3(x + v.x, y + v.y, z + v.z); }
@@ -22,8 +22,8 @@ struct vec3 {
 	__host__ __device__ inline vec3 operator*(const vec3& v) const { return vec3(x * v.x, y * v.y, z * v.z); }
 	__host__ __device__ inline vec3 operator-() const { return vec3(-x, -y, -z); }
 	__host__ __device__ inline vec3 normalize() const { return (*this) * (1 / (length() + epsilon)); }
-	__host__ __device__ inline float length() const { return sqrt(x * x + y * y + z * z); }
-	__host__ __device__ inline float average() { return (x + y + z) / 3; }
+	__host__ __device__ inline float length() const { return sqrtf(x * x + y * y + z * z); }
+	__host__ __device__ inline float average() { return (x + y + z) / 3.0f; }
 	__host__ __device__ inline float axisCoordinate(Axis axis) {
 		if (axis == Axis_X) return x;
 		if (axis == Axis_Y) return y;
@@ -45,8 +45,8 @@ struct vec4 {
 	//--------------------------
 	float x, y, z, w;
 
-	__host__ __device__ inline vec4(float x0 = 0, float y0 = 0, float z0 = 0, float w0 = 0) { x = x0; y = y0; z = z0; w = w0; }
-	__host__ __device__ inline vec4(vec3 vec3, float w0 = 0) { x = vec3.x; y = vec3.z; z = vec3.y; w = w0; }
+	__host__ __device__ inline vec4(float x0 = 0.0f, float y0 = 0.0f, float z0 = 0.0f, float w0 = 0.0f) { x = x0; y = y0; z = z0; w = w0; }
+	__host__ __device__ inline vec4(vec3 vec3, float w0 = 0.0f) { x = vec3.x; y = vec3.z; z = vec3.y; w = w0; }
 	__host__ __device__ inline float& operator[](int j) { return *(&x + j); }
 	__host__ __device__ inline float operator[](int j) const { return *(&x + j); }
 	__host__ __device__ inline vec3 xyz() {
@@ -119,34 +119,34 @@ __host__ __device__ inline mat4 operator*(const mat4& left, const mat4& right) {
 }
 
 __host__ __device__ inline mat4 TranslateMatrix(vec3 t) {
-	return mat4(vec4(1, 0, 0, 0),
-		vec4(0, 1, 0, 0),
-		vec4(0, 0, 1, 0),
-		vec4(t.x, t.y, t.z, 1));
+	return mat4(vec4(1.0f, 0.0f, 0.0f, 0.0f),
+		vec4(0.0f, 1.0f, 0.0f, 0.0f),
+		vec4(0.0f, 0.0f, 1.0f, 0.0f),
+		vec4(t.x, t.y, t.z, 1.0f));
 }
 
 __host__ __device__ inline mat4 ScaleMatrix(vec3 s) {
 	return mat4(
-		vec4(s.x, 0, 0, 0),
-		vec4(0, s.y, 0, 0),
-		vec4(0, 0, s.z, 0),
-		vec4(0, 0, 0, 1));
+		vec4(s.x, 0.0f, 0.0f, 0.0f),
+		vec4(0.0f, s.y, 0.0f, 0.0f),
+		vec4(0.0f, 0.0f, s.z, 0.0f),
+		vec4(0.0f, 0.0f, 0.0f, 1.0f));
 }
 
 __host__ __device__ inline mat4 RotationMatrix(float angle, vec3 w) {
 	float c = cosf(angle), s = sinf(angle);
 	w = w.normalize();
 	return mat4(
-		vec4(c * (1.0f - w.x * w.x) + w.x * w.x, w.x * w.y * (1.0f - c) + w.z * s, w.x * w.z * (1 - c) - w.y * s, 0),
-		vec4(w.x * w.y * (1 - c) - w.z * s, c * (1 - w.y * w.y) + w.y * w.y, w.y * w.z * (1 - c) + w.x * s, 0),
-		vec4(w.x * w.z * (1 - c) + w.y * s, w.y * w.z * (1 - c) - w.x * s, c * (1 - w.z * w.z) + w.z * w.z, 0),
-		vec4(0, 0, 0, 1));
+		vec4(c * (1.0f - w.x * w.x) + w.x * w.x, w.x * w.y * (1.0f - c) + w.z * s, w.x * w.z * (1.0f - c) - w.y * s, 0.0f),
+		vec4(w.x * w.y * (1.0f - c) - w.z * s, c * (1.0f - w.y * w.y) + w.y * w.y, w.y * w.z * (1.0f - c) + w.x * s, 0.0f),
+		vec4(w.x * w.z * (1.0f - c) + w.y * s, w.y * w.z * (1.0f - c) - w.x * s, c * (1.0f - w.z * w.z) + w.z * w.z, 0.0f),
+		vec4(0.0f, 0.0f, 0.0f, 1.0f));
 }
 
 inline mat4 SRTmtx(vec3 scale, vec3 rotation, vec3 translate) {
 	return ScaleMatrix(scale)
-		* RotationMatrix(rotation.x, vec3(1, 0, 0))
-		* RotationMatrix(rotation.y, vec3(0, 1, 0))
-		* RotationMatrix(rotation.z, vec3(0, 0, 1))
+		* RotationMatrix(rotation.x, vec3(1.0f, 0.0f, 0.0f))
+		* RotationMatrix(rotation.y, vec3(0.0f, 1.0f, 0.0f))
+		* RotationMatrix(rotation.z, vec3(0.0f, 0.0f, 1.0f))
 		* TranslateMatrix(translate);
 }

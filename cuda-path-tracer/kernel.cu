@@ -30,12 +30,12 @@
 
 
 // Pseudo-random number in [0,1)
-//__host__ __device__ double random() { return (double)rand() / RAND_MAX; }
+//__host__ __device__ float random() { return (float)rand() / RAND_MAX; }
 
 
 struct Rand {
-	__device__  static double random(curandState_t* state) {
-		return curand_uniform_double(state);
+	__device__ static float random(curandState_t* state) {
+		return curand_uniform(state);
 	}
 };
 
@@ -52,62 +52,62 @@ struct Material {
 };
 
 // sample direction with cosine distribution, returns the pdf
-__device__ double SampleDiffuse(const vec3& N, const vec3& inDir, vec3& outDir, curandState_t* state) {
-	vec3 T = cross(N, vec3(1, 0, 0));	// Find a Cartesian frame T, B, N where T, B are in the plane
-	if (T.length() < epsilon) T = cross(N, vec3(0, 0, 1));
+__device__ float SampleDiffuse(const vec3& N, const vec3& inDir, vec3& outDir, curandState_t* state) {
+	vec3 T = cross(N, vec3(1.0f, 0.0f, 0.0f));	// Find a Cartesian frame T, B, N where T, B are in the plane
+	if (T.length() < epsilon) T = cross(N, vec3(0.0f, 0.0f, 1.0f));
 	T = T.normalize();
 	vec3 B = cross(N, T);
 
 
-	//double u = Rand::random(state);
-	//double v = Rand::random(state);
+	//float u = Rand::random(state);
+	//float v = Rand::random(state);
 
-	//double alpha = M_PI * 2.0 * u;
-	//double beta = std::asin(std::sqrt(v));
+	//float alpha = M_PI * 2.0f * u;
+	//float beta = asinf(sqrtf(v));
+	
+	//outDir = (T * cosf(alpha) + B * sinf(alpha)) * sinf(beta) + N * cosf(beta);
+	//return 1 / (2.0f * M_PI) * sinf(2.0f * beta);	// pdf
 
-	//outDir = (T * cos(alpha) + B * sin(alpha)) * sin(beta) + N * cos(beta);
-	//return 1 / (2.0 * M_PI) * std::sin(2.0 * beta);	// pdf
-
-	double x, y, z;
+	float x, y, z;
 	do {
-		x = 2 * Rand::random(state) - 1;    // random point in [-1,-1;1,1]
-		y = 2 * Rand::random(state) - 1;
-	} while (x * x + y * y > 1);  // reject if not in circle
-	z = sqrt(1 - x * x - y * y);  // project to hemisphere
+		x = 2.0f * Rand::random(state) - 1.0f;    // random point in [-1,-1;1,1]
+		y = 2.0f * Rand::random(state) - 1.0f;
+	} while (x * x + y * y > 1.0f);  // reject if not in circle
+	z = sqrtf(1.0f - x * x - y * y);  // project to hemisphere
 
 	outDir = N * z + T * x + B * y;
 	return z / M_PI;	// pdf
 }
 
 // sample direction with cosine distribution, returns the pdf
-__device__ double SamplePhong(const vec3& N, const vec3& inDir, vec3& outDir, curandState_t* state) {
-	vec3 R = inDir - N * dot(N, inDir) * 2;
+__device__ float SamplePhong(const vec3& N, const vec3& inDir, vec3& outDir, curandState_t* state) {
+	vec3 R = inDir - N * dot(N, inDir) * 2.0f;
 	vec3 T = cross(R, N);
-	if (T.length() < epsilon) T = cross(R, vec3(0, 0, 1));
+	if (T.length() < epsilon) T = cross(R, vec3(0.0f, 0.0f, 1.0f));
 	T = T.normalize();
 	vec3 B = cross(R, T);
 
-	double u = Rand::random(state);
-	double v = Rand::random(state);
+	float u = Rand::random(state);
+	float v = Rand::random(state);
 
-	double n = 4;
-	double alpha = PI * 2.0 * u;
-	double beta = std::pow(std::acos(1-v), 1.0/(n+1));
+	float n = 4.0f;
+	float alpha = PI * 2.0f * u;
+	float beta = powf(acosf(1.0f-v), 1.0f/(n+1.0f));
 
 
-	outDir = (T * cos(alpha) + B * sin(alpha)) * sin(beta) + R * cos(beta);
-	return (1 / (2.0 * M_PI) )* (n+1) * std::pow(std::cos(beta), n) * std::sin(beta);	// pdf
+	outDir = (T * cosf(alpha) + B * sinf(alpha)) * sinf(beta) + R * cosf(beta);
+	return (1.0f / (2.0f * M_PI)) * (n+1.0f) * powf(cosf(beta), n) * sinf(beta);    // pdf
 }
 
 // sample direction of a Dirac delta distribution, returns the pdf
-__device__ double SampleMirror(const vec3& N, const vec3& inDir, vec3& outDir) {
-	outDir = inDir - N * dot(N, inDir) * 2;
-	return 1;	// pdf
+__device__ float SampleMirror(const vec3& N, const vec3& inDir, vec3& outDir) {
+	outDir = inDir - N * dot(N, inDir) * 2.0f;
+	return 1.0f;    // pdf
 }
 
 // Hit of ray tracing
 struct Hit {
-	double t;		// ray parameter
+	float t;		// ray parameter
 	vec3 position;	// position of the intersection
 	vec3 normal;	// normal of the intersected surface
 	Material* material;	// material of the intersected surface
@@ -134,31 +134,31 @@ public:
 // Sphere
 struct Sphere : public Intersectable {
 	vec3 center;
-	double radius;
+	float radius;
 
 	Sphere() : Intersectable() {}
 
-	Sphere(const vec3& _center, double _radius, Material* mat1) : Intersectable(mat1) {
+	Sphere(const vec3& _center, float _radius, Material* mat1) : Intersectable(mat1) {
 		center = _center;
 		radius = _radius;
 	}
 	__host__ __device__ Hit intersect(const Ray& ray) {
 		Hit hit;
 		vec3 dist = ray.start - center;
-		double a = dot(ray.dir, ray.dir);
-		double b = dot(dist, ray.dir) * 2.0f;
-		double c = dot(dist, dist) - radius * radius;
-		double discr = b * b - 4.0f * a * c;
-		if (discr < 0) return hit;
-		double sqrt_discr = sqrt(discr);
-		double t1 = (-b + sqrt_discr) / 2.0f / a;	// t1 >= t2 for sure
-		double t2 = (-b - sqrt_discr) / 2.0f / a;
-		if (t1 <= 0) return hit;
-		hit.t = (t2 > 0) ? t2 : t1;
+		float a = dot(ray.dir, ray.dir);
+		float b = dot(dist, ray.dir) * 2.0f;
+		float c = dot(dist, dist) - radius * radius;
+		float discr = b * b - 4.0f * a * c;
+		if (discr < 0.0f) return hit;
+		float sqrt_discr = sqrtf(discr);
+		float t1 = (-b + sqrt_discr) / 2.0f / a;	// t1 >= t2 for sure
+		float t2 = (-b - sqrt_discr) / 2.0f / a;
+		if (t1 <= 0.0f) return hit;
+		hit.t = (t2 > 0.0f) ? t2 : t1;
 		hit.position = ray.start + ray.dir * hit.t;
 		hit.normal = (hit.position - center) / radius;
 		hit.material = material;
-		if (dot(hit.normal, ray.dir) > 0) hit.normal = hit.normal * (-1); // flip the normal, we are inside the sphere
+		if (dot(hit.normal, ray.dir) > 0.0f) hit.normal = hit.normal * (-1.0f); // flip the normal, we are inside the sphere
 		return hit;
 	}
 };
@@ -175,15 +175,15 @@ struct Plane : public Intersectable {
 	}
 	__host__ __device__ Hit intersect(const Ray& ray) {
 		Hit hit;
-		double NdotV = dot(normal, ray.dir);
-		if (fabs(NdotV) < epsilon) return hit;
-		double t = dot(normal, point - ray.start) / NdotV;
+		float NdotV = dot(normal, ray.dir);
+		if (fabsf(NdotV) < epsilon) return hit;
+		float t = dot(normal, point - ray.start) / NdotV;
 		if (t < epsilon) return hit;
 		hit.t = t;
 		hit.position = ray.start + ray.dir * hit.t;
 		hit.normal = normal;
 		//if ((hit.position - point).length() > 1.5) return Hit();
-		if (dot(hit.normal, ray.dir) > 0) hit.normal = hit.normal * (-1); // flip the normal, we are inside the sphere
+		if (dot(hit.normal, ray.dir) > 0.0f) hit.normal = hit.normal * (-1.0f); // flip the normal, we are inside the sphere
 		hit.material = material;
 		return hit;
 	}
@@ -193,11 +193,11 @@ struct Plane : public Intersectable {
 //Ring
 struct Ring : public Intersectable {
 	vec3 position, normal;
-	double radius, height;
+	float radius, height;
 
 	Ring() : Intersectable() {}
 
-	Ring(const vec3& _point, const vec3& _normal, double _height, double _radius, Material* mat) : Intersectable(mat) {
+	Ring(const vec3& _point, const vec3& _normal, float _height, float _radius, Material* mat) : Intersectable(mat) {
 		position = _point;
 		normal = _normal.normalize();
 		height = _height;
@@ -216,33 +216,33 @@ struct Ring : public Intersectable {
 		float a = dot(ray.dir - normal * coreDotDir, ray.dir - normal * coreDotDir);
 
 		float discr = (b * b) - (4.0f * a * c);
-		if (discr < 0) return hit; //no real solutin
+		if (discr < 0.0f) return hit; //no real solution
 
-		double sqrt_discr = sqrt(discr);
-		double t1 = (-b - sqrt_discr) / 2.0f / a;
-		double t2 = (-b + sqrt_discr) / 2.0f / a;
+		float sqrt_discr = sqrtf(discr);
+		float t1 = (-b - sqrt_discr) / 2.0f / a;
+		float t2 = (-b + sqrt_discr) / 2.0f / a;
 
 		float t1Height = coreDotDistance + t1 * coreDotDir;
 		float t2Height = coreDotDistance + t2 * coreDotDir;
 
-		if (t2 <= 0) { //neither of the solutions are on the "good" side of the ray, no itersection
+		if (t2 <= 0.0f) { //neither of the solutions are on the "good" side of the ray, no intersection
 			return hit;
 		}
-		if (t1 > 0) {
-			if (t1Height > 0 && t1Height < height) {
+		if (t1 > 0.0f) {
+			if (t1Height > 0.0f && t1Height < height) {
 				hit.t = t1;
 				hit.position = ray.start + ray.dir * t1;
 				hit.normal = (position + normal * t1Height - hit.position).normalize();
-				if (dot(hit.normal, ray.dir) > 0) hit.normal = hit.normal * (-1); // flip the normal, we are inside the sphere
+				if (dot(hit.normal, ray.dir) > 0.0f) hit.normal = hit.normal * (-1.0f); // flip the normal
 				hit.material = material;
 				return hit;
 			}
 		}
-		if (t2Height > 0 && t2Height < height) {
+		if (t2Height > 0.0f && t2Height < height) {
 			hit.t = t2; 
 			hit.position = ray.start + ray.dir * t2;
 			hit.normal = (position + normal * t2Height - hit.position).normalize();
-			if (dot(hit.normal, ray.dir) > 0) hit.normal = hit.normal * (-1); // flip the normal, we are inside the sphere
+			if (dot(hit.normal, ray.dir) > 0.0f) hit.normal = hit.normal * (-1.0f); // flip the normal
 			hit.material = material;
 			return hit;
 		}
@@ -290,14 +290,14 @@ struct Triangle {
 
 		// check if ray and plane are parallel ?
 		float NdotRayDirection = dot(N, ray.dir);
-		if (fabs(NdotRayDirection) < epsilon) // almost 0 
+		if (fabsf(NdotRayDirection) < epsilon) // almost 0 
 			return hit; // they are parallel so they don't intersect ! 
 
 		float d = -dot(N, a.position);
 		hit.t = -(dot(N, ray.start) + d) / NdotRayDirection;
 
 		// check if the triangle is in behind the ray
-		if (hit.t < 0) return hit; // the triangle is behind 
+		if (hit.t < 0.0f) return hit; // the triangle is behind 
 
 		// compute the intersection point using equation 1
 		vec3 P = ray.start + ray.dir * hit.t;
@@ -308,8 +308,8 @@ struct Triangle {
 		// edge 0
 		vec3 vpA = P - a.position;
 		C = cross(ab, vpA);
-		if (dot(N, C) < 0) {
-			hit.t = -1;
+		if (dot(N, C) < 0.0f) {
+			hit.t = -1.0f;
 			return hit;
 		} // P is on the right side 
 
@@ -317,8 +317,8 @@ struct Triangle {
 		vec3 bc = c.position - b.position;
 		vec3 vpB = P - b.position;
 		C = cross(bc, vpB);
-		if (dot(N, C) < 0) {
-			hit.t = -1;
+		if (dot(N, C) < 0.0f) {
+			hit.t = -1.0f;
 			return hit;
 		} // P is on the right side
 
@@ -326,8 +326,8 @@ struct Triangle {
 		vec3 ca = a.position - c.position;
 		vec3 vpC = P - c.position;
 		C = cross(ca, vpC);
-		if (dot(N, C) < 0) {
-			hit.t = -1;
+		if (dot(N, C) < 0.0f) {
+			hit.t = -1.0f;
 			return hit;
 		}  // P is on the right side; 
 
@@ -351,9 +351,7 @@ struct Triangle {
 		bary[1] = (daa * dhc - dac * dha) / denom;
 		bary[2] = 1.0f - bary[0] - bary[1];
 		hit.normal = (a.normal * bary[0] + b.normal * bary[2] + c.normal * bary[1]).normalize();
-		//hit.normal = N.normalize();
-		if (dot(hit.normal, ray.dir) > 0) hit.normal = hit.normal * (-1); // flip the normal, we are inside the sphere
-		//hit.material = material;
+		if (dot(hit.normal, ray.dir) > 0.0f) hit.normal = hit.normal * (-1.0f); // flip the normal
 		return hit; // this ray hits the triangle
 	}
 };
@@ -434,7 +432,7 @@ struct Box {
 
 		Hit bestHit;
 		for (int i = 0; i < 6; i++) {
-			if (t[i] > 0 && (bestHit.t < 0 || t[i] < bestHit.t)
+			if (t[i] > 0.0f && (bestHit.t < 0.0f || t[i] < bestHit.t)
 				&& isVertexInBox(potentialPoint[i])) bestHit.t = t[i];
 		}
 		return bestHit;
@@ -918,14 +916,13 @@ public:
 		copyHDRToCuda(nz, device_nz);
 	}
 	__host__ __device__ vec3 getPixelColor(vec3 ray) {
-		//return vec3(0, 0, 0);
 		HDRLoaderResult* hit = device_px;
 		if ((abs(ray.x) >= abs(ray.y)) && (abs(ray.x) >= abs(ray.z))) {
-			if (ray.x > 0) hit = device_px;
+			if (ray.x > 0.0f) hit = device_px;
 			else hit = device_nx;
 
-			int pos = ((int)((1.0 - ((ray.y / abs(ray.x) + 1.0) / 2.0)) * hit->height)) * 3 * hit->width
-				+ ((int)((1.0 - ((ray.z / ray.x + 1.0) / 2.0)) * hit->width)) * 3;
+			int pos = ((int)((1.0f - ((ray.y / abs(ray.x) + 1.0f) / 2.0f)) * hit->height)) * 3 * hit->width
+				+ ((int)((1.0f - ((ray.z / ray.x + 1.0f) / 2.0f)) * hit->width)) * 3;
 			if (pos > hit->height * hit->width * 3 - 3) pos = hit->height * hit->width * 3 - 3;
 			return vec3(
 				hit->cols[pos],
@@ -934,10 +931,10 @@ public:
 			);
 		}
 		else if ((abs(ray.y) >= abs(ray.x)) && (abs(ray.y) >= abs(ray.z))) {
-			if (ray.y > 0) hit = device_py;
+			if (ray.y > 0.0f) hit = device_py;
 			else hit = device_ny;
-			int pos = ((int)((ray.z / ray.y + 1.0) / 2.0 * hit->height)) * 3 * hit->width
-				+ ((int)((ray.x / abs(ray.y) + 1.0) / 2.0 * hit->width)) * 3;
+			int pos = ((int)((ray.z / ray.y + 1.0f) / 2.0f * hit->height)) * 3 * hit->width
+				+ ((int)((ray.x / abs(ray.y) + 1.0f) / 2.0f * hit->width)) * 3;
 			if (pos > hit->height * hit->width * 3 - 3) pos = hit->height * hit->width * 3 - 3;
 			return vec3(
 				hit->cols[pos],
@@ -946,10 +943,10 @@ public:
 			);
 		}
 		else if ((abs(ray.z) >= abs(ray.x)) && (abs(ray.z) >= abs(ray.y))) {
-			if (ray.z > 0) hit = device_pz;
+			if (ray.z > 0.0f) hit = device_pz;
 			else hit = device_nz;
-			int pos = ((int)((1.0 - ((ray.y / abs(ray.z) + 1.0) / 2.0)) * hit->height)) * 3 * hit->width
-				+ ((int)((ray.x / ray.z + 1.0) / 2.0 * hit->width)) * 3;
+			int pos = ((int)((1.0f - ((ray.y / abs(ray.z) + 1.0f) / 2.0f)) * hit->height)) * 3 * hit->width
+				+ ((int)((ray.x / ray.z + 1.0f) / 2.0f * hit->width)) * 3;
 			if (pos > hit->height * hit->width * 3 - 3) pos = hit->height * hit->width * 3 - 3;
 			return vec3(
 				hit->cols[pos],
@@ -964,16 +961,16 @@ public:
 class Camera {
 	vec3 eye, lookat, right, up;
 public:
-	void set(vec3 _eye, vec3 _lookat, vec3 vup, double fov) {
+	void set(vec3 _eye, vec3 _lookat, vec3 vup, float fov) {
 		eye = _eye;
 		lookat = _lookat;
 		vec3 w = eye - lookat;
-		double f = w.length();
+		float f = w.length();
 		right = cross(vup, w).normalize() * f * tanf(fov / 2.0f);	// orthogonalization
 		up = cross(w, right).normalize() * f * tanf(fov / 2.0f);
 	}
-	__host__ __device__ Ray getRay(double X, double Y) {	// integer parts of X, Y define the pixel, fractional parts the point inside pixel
-		vec3 dir = lookat + right * (2.0 * X / screenWidth - 1) + up * (2.0 * Y / screenHeight - 1) - eye;
+	__host__ __device__ Ray getRay(float X, float Y) {	// integer parts of X, Y define the pixel, fractional parts the point inside pixel
+		vec3 dir = lookat + right * (2.0f * X / screenWidth - 1.0f) + up * (2.0f * Y / screenHeight - 1.0f) - eye;
 		return Ray(eye, dir);
 	}
 };
@@ -991,33 +988,33 @@ struct Light {
 		location = _location;
 		power = _power;
 	}
-	__host__ __device__ double distanceOf(vec3 point) {
+	__host__ __device__ float distanceOf(vec3 point) {
 		return (location - point).length();
 	}
 	__host__ __device__ vec3 directionOf(vec3 point) {
 		return (location - point).normalize();
 	}
 	__host__ __device__ vec3 radianceAt(vec3 point) {
-		double distance2 = dot(location - point, location - point);
+		float distance2 = dot(location - point, location - point);
 		if (distance2 < epsilon) distance2 = epsilon;
-		return power / distance2 / 4 / M_PI;
+		return power / distance2 / 4.0f / M_PI;
 	}
 	__device__  void randomSampleRay(vec3& outDir, curandState_t* state) {
-		vec3 X = vec3(0, 0, 1);
-		vec3 Y = vec3(0, 1, 0);
-		vec3 Z = vec3(1, 0, 0);
+		vec3 X = vec3(0.0f, 0.0f, 1.0f);
+		vec3 Y = vec3(0.0f, 1.0f, 0.0f);
+		vec3 Z = vec3(1.0f, 0.0f, 0.0f);
 
-		double alpha = Rand::random(state) * 2.0 * PI;
-		double beta = Rand::random(state) * 2.0 * PI;
+		float alpha = Rand::random(state) * 2.0f * PI;
+		float beta = Rand::random(state) * 2.0f * PI;
 
-		outDir = ((X * cos(alpha) + Z * sin(alpha)) * sin(beta) + Y * cos(beta)).normalize();
+		outDir = ((X * cosf(alpha) + Z * sinf(alpha)) * sinf(beta) + Y * cosf(beta)).normalize();
 
-		//double x, y, z;
+		//float x, y, z;
 		//do {
 		//	x = 2 * Rand::random(state) - 1;    // random point in [-1,-1;1,1]
 		//	y = 2 * Rand::random(state) - 1;
 		//} while (x * x + y * y > 1);  // reject if not in circle
-		//z = sqrt(1 - x * x - y * y);  // project to hemisphere
+		//z = sqrtf(1 - x * x - y * y);  // project to hemisphere
 
 		//outDir = X * z + Y * x + Z * y;
 	}
@@ -1044,10 +1041,10 @@ public:
 	Camera camera;
 	EnvMap envMap = EnvMap("resources/hdr-env-cube/");
 	void build() {
-		vec3 eye = vec3(0, 0, 3);
-		vec3 vup = vec3(0, 1, 0);
-		vec3 lookat = vec3(0, 0, 0);
-		double fov = 100 * M_PI / 180;
+		vec3 eye = vec3(0.0f, 0.0f, 3.0f);
+		vec3 vup = vec3(0.0f, 1.0f, 0.0f);
+		vec3 lookat = vec3(0.0f, 0.0f, 0.0f);
+		float fov = 100.0f * M_PI / 180.0f;
 		camera.set(eye, lookat, vup, fov);
 
 		//LIGHTS
@@ -1055,7 +1052,7 @@ public:
 		copyToDevice(device_lights_size, light_size, "device_lights_size");
 
 		Light* lights = new Light[light_size]; 
-		lights[0] = Light(vec3(0, -4, -4.5), vec3(1000, 1000, 1000));
+		lights[0] = Light(vec3(0.0f, -4.0f, -4.5f), vec3(1000.0f, 1000.0f, 1000.0f));
 		//lights[1] = Light(vec3(0, 10, -3), vec3(2000, 2000, 2000));
 		//lights[1] = Light(vec3(0, 6, 4), vec3(2000, 2000, 2000));
 		//lights[2] = Light(vec3(0, 2, -2), vec3(2000, 2000, 2000));
@@ -1082,12 +1079,12 @@ public:
 		copyToDevice(device_plane_size, planes_size, "device_plane_size");
 
 		Plane* planes = new Plane[planes_size];
-		planes[0] = Plane(vec3(0, -5, 0), vec3(0, 1, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0,0.0, 0.0)));
-		planes[1] = Plane(vec3(0, 0, 5), vec3(0, 0, 1), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
-		planes[2] = Plane(vec3(0, 0, -5), vec3(0, 0, 1), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
-		planes[3] = Plane(vec3(5, 0, 0), vec3(1, 0, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
-		planes[4] = Plane(vec3(-5, 0, 0), vec3(1, 0, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
-		planes[5] = Plane(vec3(0, 5, 0), vec3(0, 1, 0), new Material(vec3(0.9, 0.9, 0.9), vec3(0.0, 0.0, 0.0)));
+		planes[0] = Plane(vec3(0.0f, -5.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f), new Material(vec3(0.9f, 0.9f, 0.9f), vec3(0.0f, 0.0f, 0.0f)));
+		planes[1] = Plane(vec3(0.0f, 0.0f, 5.0f), vec3(0.0f, 0.0f, 1.0f), new Material(vec3(0.9f, 0.9f, 0.9f), vec3(0.0f, 0.0f, 0.0f)));
+		planes[2] = Plane(vec3(0.0f, 0.0f, -5.0f), vec3(0.0f, 0.0f, 1.0f), new Material(vec3(0.9f, 0.9f, 0.9f), vec3(0.0f, 0.0f, 0.0f)));
+		planes[3] = Plane(vec3(5.0f, 0.0f, 0.0f), vec3(1.0f, 0.0f, 0.0f), new Material(vec3(0.9f, 0.9f, 0.9f), vec3(0.0f, 0.0f, 0.0f)));
+		planes[4] = Plane(vec3(-5.0f, 0.0f, 0.0f), vec3(1.0f, 0.0f, 0.0f), new Material(vec3(0.9f, 0.9f, 0.9f), vec3(0.0f, 0.0f, 0.0f)));
+		planes[5] = Plane(vec3(0.0f, 5.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f), new Material(vec3(0.9f, 0.9f, 0.9f), vec3(0.0f, 0.0f, 0.0f)));
 
 		copyToDevice(device_planes, planes, planes_size, "device_planes");
 
@@ -1126,25 +1123,25 @@ public:
 
 		meshes[0] = MeshObject(
 			"resources/objects/cube.obj",
-			vec3(2.0, -4, -4), //position
-			vec3(0.0,0.0, 0.0),  //rotate
-			vec3(1, 1, 1),  //scale
-			new Material(vec3(0.8392, 0.0, 0.4392), vec3(0.0, 0.0, 0.0))
+			vec3(2.0f, -4.0f, -4.0f), //position
+			vec3(0.0f, 0.0f, 0.0f),  //rotate
+			vec3(1.0f, 1.0f, 1.0f),  //scale
+			new Material(vec3(0.8392f, 0.0f, 0.4392f), vec3(0.0f, 0.0f, 0.0f))
 		);
 
 		meshes[1] = MeshObject(
 			"resources/objects/cube.obj",
-			vec3(0, -4, -2.5), //position
-			vec3(0.0, 0.0, 0.0),  //rotate
-			vec3(1, 1, 1),  //scale
-			new Material(vec3(0.6078, 0.3098, 0.5882), vec3(0.0, 0.0, 0.0))
+			vec3(0.0f, -4.0f, -2.5f), //position
+			vec3(0.0f, 0.0f, 0.0f),  //rotate
+			vec3(1.0f, 1.0f, 1.0f),  //scale
+			new Material(vec3(0.6078f, 0.3098f, 0.5882f), vec3(0.0f, 0.0f, 0.0f))
 		);
 		meshes[2] = MeshObject(
 			"resources/objects/cube.obj",
-			vec3(-2, -4, -4), //position
-			vec3(0.0, M_PI, 0.0),  //rotate
-			vec3(1, 1, 1),  //scale
-			new Material(vec3(0.0, 0.2196, 0.6588), vec3(0.0, 0.0, 0.0))
+			vec3(-2.0f, -4.0f, -4.0f), //position
+			vec3(0.0f, M_PI, 0.0f),  //rotate
+			vec3(1.0f, 1.0f, 1.0f),  //scale
+			new Material(vec3(0.0f, 0.2196f, 0.6588f), vec3(0.0f, 0.0f, 0.0f))
 		);
 
 		copyToDevice(device_meshes, meshes, mesh_size, "device_meshes");
@@ -1174,7 +1171,7 @@ public:
 		return bestHit;
 	}
 
-	__device__ double clamp(double x, double min, double max) {
+	__device__ float clamp(float x, float min, float max) {
 		if (x < min) {
 			return min;
 		}
@@ -1186,39 +1183,39 @@ public:
 
 	// Trace a ray and return the radiance of the visible surface
 	__device__ vec3 trace(Ray _ray, EnvMap envMap, curandState_t* state) {
-		vec3 outRad(0, 0, 0);
+		vec3 outRad(0.0f, 0.0f, 0.0f);
 
 		//random light ray
-		int light_idx = (int) (Rand::random(state) * ((double)*device_lights_size));
+		int light_idx = (int)(Rand::random(state) * ((float)*device_lights_size));
 		vec3 light_source_out_dir;
 		device_lights[light_idx].randomSampleRay(light_source_out_dir, state);
 
 		//first hit
 		Hit first_light_hit = firstIntersect(Ray(device_lights[light_idx].location, light_source_out_dir));
-		if (first_light_hit.t < 0) {
+		if (first_light_hit.t < 0.0f) {
 			return outRad;
 		}
 
 		Hit light_paths_hits[maxdepth];
 		vec3 light_paths_radiance[maxdepth];
-		double light_paths_pdf[maxdepth];
+		float light_paths_pdf[maxdepth];
 		light_paths_hits[0] = first_light_hit;
 		light_paths_radiance[0] = device_lights[light_idx].radianceAt(first_light_hit.position);
-		light_paths_pdf[0] = 1.0 / ((double)*device_lights_size) * 1.0 / (4.0 * M_PI);
+		light_paths_pdf[0] = 1.0f / ((float)*device_lights_size) * 1.0f / (4.0f * M_PI);
 		
 		//make light paths
 		for (int i = 0; i < maxdepth; i++) {
 
-			double diffuseSelectProb = light_paths_hits[i].material->diffuseAlbedo.average();
-			double mirrorSelectProb = light_paths_hits[i].material->mirrorAlbedo.average();
-			double rnd = Rand::random(state);	// Russian roulette to find diffuse, mirror or no reflection
+			float diffuseSelectProb = light_paths_hits[i].material->diffuseAlbedo.average();
+			float mirrorSelectProb = light_paths_hits[i].material->mirrorAlbedo.average();
+			float rnd = Rand::random(state);	// Russian roulette to find diffuse, mirror or no reflection
 
 			if (rnd < diffuseSelectProb + mirrorSelectProb) {
 				vec3 lightDirIn = (i == 0) ?
 					light_source_out_dir :
 					(light_paths_hits[i].position - light_paths_hits[i - 1].position).normalize();
 				vec3 lightDirOut;
-				double pdf_brdf;
+				float pdf_brdf;
 
 				if (rnd < diffuseSelectProb) { // diffuse
 					pdf_brdf = SampleDiffuse(
@@ -1227,7 +1224,7 @@ public:
 						lightDirOut,
 						state
 					) * diffuseSelectProb;
-					double cosThetaL = dot(light_paths_hits[i].normal, lightDirIn * (-1));
+					float cosThetaL = dot(light_paths_hits[i].normal, lightDirIn * (-1));
 					if (cosThetaL > epsilon) {
 						if (i == 0) {
 							light_paths_radiance[i] = light_paths_radiance[i] * (light_paths_hits[i].material->diffuseAlbedo) / M_PI * cosThetaL;
@@ -1248,7 +1245,7 @@ public:
 						lightDirIn,
 						lightDirOut
 					)* mirrorSelectProb;
-					double cosThetaL = dot(light_paths_hits[i].normal, lightDirIn * (-1));
+					float cosThetaL = dot(light_paths_hits[i].normal, lightDirIn * (-1));
 					if (cosThetaL > epsilon) {
 						if (i == 0) {
 							light_paths_radiance[i] = light_paths_radiance[i] * (light_paths_hits[i].material->mirrorAlbedo);
@@ -1281,12 +1278,12 @@ public:
 
 
 		vec3 paths_color[maxdepth * (maxdepth + 1)];
-		double paths_probability[maxdepth * (maxdepth + 1)];
+		float paths_probability[maxdepth * (maxdepth + 1)];
 		int n_paths = 0;
 
 
-		vec3 pixel_path_brdf = vec3(1, 1, 1);
-		double pixel_path_pdf = 1.0;
+		vec3 pixel_path_brdf = vec3(1.0f, 1.0f, 1.0f);
+		float pixel_path_pdf = 1.0f;
 		Ray ray = _ray;
 
 		//make paths
@@ -1303,7 +1300,7 @@ public:
 				// vec3 outDir = device_lights[i].directionOf(hit.position);
 				//	Hit shadowHit = firstIntersect(Ray(hit.position + hit.normal * epsilon, outDir));
 				//	if (shadowHit.t < epsilon || shadowHit.t > device_lights[i].distanceOf(hit.position)) {	// if not in shadow
-				//		double cosThetaL = dot(hit.normal, outDir);
+				//		float cosThetaL = dot(hit.normal, outDir);
 				//		if (cosThetaL >= epsilon) {
 				//			outRad += hit.material->diffuseAlbedo / M_PI * cosThetaL
 				//				* device_lights[i].radianceAt(hit.position) * pixel_path_brdf /pixel_path_pdf;
@@ -1315,7 +1312,7 @@ public:
 				vec3 outDir_light = device_lights[light_idx].directionOf(hit.position);
 				Hit shadowHit = firstIntersect(Ray(hit.position + hit.normal * epsilon, outDir_light));
 				if (shadowHit.t < epsilon || shadowHit.t > device_lights[light_idx].distanceOf(hit.position)) {	// if not in shadow
-					double cosThetaL = dot(hit.normal, outDir_light);
+					float cosThetaL = dot(hit.normal, outDir_light);
 					if (cosThetaL >= epsilon) {
 						paths_color[n_paths] = device_lights[light_idx].radianceAt(hit.position)
 							* hit.material->diffuseAlbedo / M_PI * cosThetaL
@@ -1339,9 +1336,9 @@ public:
 					bool clearView = pixel_to_light_first_hit.t > 0 && (pixel_to_light_first_hit.position - light_paths_hits[i].position).length() < epsilon;
 
 					if (clearView) {
-						double r = (light_paths_hits[j].position - hit.position).length();
-						double cosThetaInPixel = dot(hit.normal, pixel_path_to_light_path.dir);
-						double cosThetaInLight = dot(light_paths_hits[j].normal, pixel_path_to_light_path.dir * (-1.0));
+						float r = (light_paths_hits[j].position - hit.position).length();
+						float cosThetaInPixel = dot(hit.normal, pixel_path_to_light_path.dir);
+						float cosThetaInLight = dot(light_paths_hits[j].normal, pixel_path_to_light_path.dir * (-1.0));
 						if (cosThetaInPixel < epsilon) {
 							continue;
 						}
@@ -1359,14 +1356,14 @@ public:
 
 				}
 
-				double diffuseSelectProb = hit.material->diffuseAlbedo.average();
-				double mirrorSelectProb = hit.material->mirrorAlbedo.average();
+				float diffuseSelectProb = hit.material->diffuseAlbedo.average();
+				float mirrorSelectProb = hit.material->mirrorAlbedo.average();
 
-				double rnd = Rand::random(state);	// Russian roulette to find diffuse, mirror or no reflection
+				float rnd = Rand::random(state);	// Russian roulette to find diffuse, mirror or no reflection
 				vec3 outDir;
 				if (rnd < diffuseSelectProb) { // diffuse
-					double pdf = SampleDiffuse(hit.normal, ray.dir, outDir, state);
-					double cosThetaL = dot(hit.normal, outDir);
+					float pdf = SampleDiffuse(hit.normal, ray.dir, outDir, state);
+					float cosThetaL = dot(hit.normal, outDir);
 					if (cosThetaL >= epsilon) {
 						pixel_path_brdf = pixel_path_brdf * (hit.material->diffuseAlbedo) / M_PI * cosThetaL; //brdf
 						pixel_path_pdf = pixel_path_pdf * pdf * diffuseSelectProb; //pdf
@@ -1376,7 +1373,7 @@ public:
 					}
 				}
 				else if (rnd < diffuseSelectProb + mirrorSelectProb) { // mirror
-					double pdf = SampleMirror(hit.normal, ray.dir, outDir);
+					float pdf = SampleMirror(hit.normal, ray.dir, outDir);
 					pixel_path_brdf = pixel_path_brdf * hit.material->mirrorAlbedo; //brdf
 					pixel_path_pdf = pixel_path_pdf * pdf * mirrorSelectProb; //pdf
 				}
@@ -1389,7 +1386,7 @@ public:
 		}
 
 		if (n_paths != 0) {
-			double sum_probability = 0;
+			float sum_probability = 0;
 			for (int i = 0; i < n_paths; i++) {
 				sum_probability += paths_probability[i];
 			}
@@ -1406,7 +1403,7 @@ public:
 __global__ void render(vec3* image, Scene scene) {
 	//indicies
 	int id = blockIdx.x * blockDim.x + threadIdx.x;
-	printf("%f \n", (float) id / (screenHeight * screenWidth));
+	printf("\rProgress: %d%%", (int)(((float)id / (screenHeight * screenWidth)) * 100));
 	if (id < screenHeight * screenWidth) {
 		int tileIdx = id / tileArea;
 
@@ -1430,15 +1427,13 @@ __global__ void render(vec3* image, Scene scene) {
 			&state);
 
 		//fill image
-		image[id] = vec3(0, 0, 0);
-		//printf("tile %d \n", tileIdx);
+		image[id] = vec3(0.0f, 0.0f, 0.0f);
 		for (int i = 0; i < nSamples; i++) {
 			image[id] += scene.trace(
 				scene.camera.getRay(column + Rand::random(&state), row + Rand::random(&state)),
 				scene.envMap,
 				&state
 			) / nSamples;
-
 		}
 	}
 }
@@ -1459,9 +1454,9 @@ void SaveTGAFile(char* fileName, const vec3* image) {
 	// List of pixel colors
 	for (int Y = screenHeight - 1; Y >= 0; Y--) {
 		for (int X = 0; X < screenWidth; X++) {
-			int R = (int)fmax(fmin(image[Y * screenWidth + X].x * 255.5, 255.5), 0);
-			int G = (int)fmax(fmin(image[Y * screenWidth + X].y * 255.5, 255.5), 0);
-			int B = (int)fmax(fmin(image[Y * screenWidth + X].z * 255.5, 255.5), 0);
+			int R = (int)fmaxf(fminf(image[Y * screenWidth + X].x * 255.5f, 255.5f), 0.0f);
+			int G = (int)fmaxf(fminf(image[Y * screenWidth + X].y * 255.5f, 255.5f), 0.0f);
+			int B = (int)fmaxf(fminf(image[Y * screenWidth + X].z * 255.5f, 255.5f), 0.0f);
 			fputc(B, tgaFile); fputc(G, tgaFile); fputc(R, tgaFile);
 		}
 	}

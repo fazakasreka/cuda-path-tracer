@@ -13,7 +13,11 @@ __host__ __device__ mat4 mat4::inverse() const {
     float det = dot(cross(a, b), c);
     if (abs(det) < epsilon) {
         // Return identity if matrix is singular
-        return mat4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
+        return mat4(1.0f, 0.0f, 0.0f, 0.0f, 
+                    0.0f, 1.0f, 0.0f, 0.0f, 
+                    0.0f, 0.0f, 1.0f, 0.0f, 
+                    0.0f, 0.0f, 0.0f, 1.0f
+        );
     }
     
     float invDet = 1.0f / det;
@@ -27,9 +31,9 @@ __host__ __device__ mat4 mat4::inverse() const {
     float tz = -dot(r2, t);
     
     return mat4(
-        r0.x, r0.y, r0.z, 0,
-        r1.x, r1.y, r1.z, 0,
-        r2.x, r2.y, r2.z, 0,
-        tx,   ty,   tz,   1
+        r0.x, r0.y, r0.z, 0.0f,
+        r1.x, r1.y, r1.z, 0.0f,
+        r2.x, r2.y, r2.z, 0.0f,
+        tx,   ty,   tz,   1.0f
     );
 }
