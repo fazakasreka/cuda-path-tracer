@@ -1,13 +1,17 @@
 #pragma once
 
-#include <cmath>
+#include <math.h>
+#include <cuda_runtime.h>
 #include "constants/constants.cuh"
+#include <iostream>
 
 enum Axis { Axis_X, Axis_Y, Axis_Z };
 __host__ __device__ inline Axis nextAxis(Axis axis) {
 	if (axis == Axis_X) return Axis_Y;
 	if (axis == Axis_Y) return Axis_Z;
 	if (axis == Axis_Z) return Axis_X;
+	printf("Invalid axis passed to nextAxis\n");
+	return Axis_X;
 }
 
 // 3D vector operations
@@ -28,6 +32,8 @@ struct vec3 {
 		if (axis == Axis_X) return x;
 		if (axis == Axis_Y) return y;
 		if (axis == Axis_Z) return z;
+		printf("Invalid axis passed to axisCoordinate\n");
+		return x;
 	}
 };
 

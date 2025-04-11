@@ -90,11 +90,25 @@
     <ClInclude Include="constants\constants.cuh" />
     <ClInclude Include="copyToDevice\copyToDevice.h" />
     <ClInclude Include="HDRLoader\HDRLoader.h" />
-    <ClCompile Include="math\math.cuh" />
+    <ClInclude Include="math\math.cuh" />
+
+    <ClInclude Include="pathTracing\camera.cuh" />
+    <ClInclude Include="pathTracing\hit.cuh" />
+    <ClInclude Include="pathTracing\intersectable.cuh" />
+    <ClInclude Include="pathTracing\light.cuh" />
+    <ClInclude Include="pathTracing\material.cuh" />
+    <ClInclude Include="pathTracing\random.cuh" />
+    <ClInclude Include="shapes\mesh.cuh" />
+    <ClInclude Include="pathTracing\ray.cuh" />
+    <ClInclude Include="pathTracing\samplers.cuh" />
+
+    <ClInclude Include="shapes\sphere.cuh" />
+    <ClInclude Include="shapes\plane.cuh" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="HDRLoader\HDRLoader.cpp" />
     <CudaCompile Include="math\math.cu" />
+    <CudaCompile Include="shapes\mesh.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,6 +1,6 @@
 #include "math.cuh"
 
-__host__ __device__ mat4 mat4::inverse() const {
+mat4 mat4::inverse() const {
     // Get the rotation/scale part (upper 3x3)
     vec3 a = vec3(rows[0][0], rows[0][1], rows[0][2]);
     vec3 b = vec3(rows[1][0], rows[1][1], rows[1][2]);
