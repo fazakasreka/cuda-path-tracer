@@ -89,7 +89,8 @@
   <ItemGroup>
     <ClInclude Include="constants\constants.cuh" />
     <ClInclude Include="copyToDevice\copyToDevice.h" />
-    <ClInclude Include="HDRLoader\HDRLoader.h" />
+    <ClInclude Include="HDRLoader\HDRLoader.cuh" />
+    <ClInclude Include="HDREnvMap\envMap.cuh" />
     <ClInclude Include="math\math.cuh" />
 
     <ClInclude Include="pathTracing\camera.cuh" />
@@ -106,7 +107,7 @@
     <ClInclude Include="shapes\plane.cuh" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="HDRLoader\HDRLoader.cpp" />
+    <CudaCompile Include="HDRLoader\HDRLoader.cu" />
     <CudaCompile Include="math\math.cu" />
     <CudaCompile Include="shapes\mesh.cu" />
   </ItemGroup>

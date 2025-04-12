@@ -12,13 +12,13 @@ public:
 	// each pixel takes 3 float32, each component can be of any value...
 	float* cols;
 
-	int size() {
+	inline int size() {
 		return width * height * 3;
 	}
 };
 
 class HDRLoader {
 public:
-	static bool load(const char* fileName, HDRLoaderResult& res);
+	 __host__ static bool load(const char* fileName, HDRLoaderResult& res);
 };
 

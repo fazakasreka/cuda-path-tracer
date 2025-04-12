@@ -6,8 +6,9 @@
 	Info:		Load HDR image and convert to a set of float32 RGB triplet.
 ************************************************************************************/
 
-#include "HDRLoader.h"
-
+#include "HDRLoader.cuh"
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 #include <math.h>
 #include <memory.h>
 #include <stdio.h>
@@ -25,7 +26,7 @@ static void workOnRGBE(RGBE* scan, int len, float* cols);
 static bool decrunch(RGBE* scanline, int len, FILE* file);
 static bool oldDecrunch(RGBE* scanline, int len, FILE* file);
 
-bool HDRLoader::load(const char* fileName, HDRLoaderResult& res)
+__host__ bool HDRLoader::load(const char* fileName, HDRLoaderResult& res)
 {
 	int i;
 	char str[200];

@@ -15,7 +15,6 @@
 #include <chrono>
 #include <queue> 
 
-#include "HDRLoader/HDRLoader.h"
 #include "copyToDevice/copyToDevice.h"
 #include "HDREnvMap/envMap.cuh"
 #include "math/math.cuh"
@@ -170,220 +169,139 @@ public:
 		return x;
 	}
 
-	// Trace a ray and return the radiance of the visible surface
+	// Bidirectional Path Tracer
 	__device__ vec3 trace(Ray _ray, EnvMap envMap, curandState_t* state) {
 		vec3 outRad(0.0f, 0.0f, 0.0f);
+		//LIGHT PATH
 
-		//random light ray
+		//choose a random light source
 		int light_idx = (int)(Rand::random(state) * ((float)*device_lights_size));
-		vec3 light_source_out_dir;
-		device_lights[light_idx].randomSampleRay(light_source_out_dir, state);
+		vec3 light_out_dir;
+		device_lights[light_idx].randomSampleRay(light_out_dir, state);
 
-		//first hit
-		Hit first_light_hit = firstIntersect(Ray(device_lights[light_idx].location, light_source_out_dir));
-		if (first_light_hit.t < 0.0f) {
-			return outRad;
+		//get the first object it hits
+		Ray light_ray(device_lights[light_idx].location, light_out_dir);
+		Hit hit = firstIntersect(light_ray);
+		if (hit.t < 0) return outRad;
+
+		//store the hits and throughputs
+		Hit light_hits[maxdepth];
+		vec3 light_throughput[maxdepth];
+		float light_pdf[maxdepth];
+
+		//initialize the first item
+		light_hits[0] = hit;
+		light_throughput[0] = device_lights[light_idx].radianceAt(hit.position);
+		light_pdf[0] = (1.0f / (float)*device_lights_size) * (1.0f / (4.0f * PI));
+
+		for (int i = 0; i < maxdepth - 1; i++) {
+			float diffProb = light_hits[i].material->diffuseAlbedo.average();
+			float mirrorProb = light_hits[i].material->mirrorAlbedo.average();
+			float rnd = Rand::random(state);
+
+			if (rnd >= diffProb + mirrorProb) break;
+
+			vec3 inDir = (i == 0) ? light_out_dir :
+				(light_hits[i].position - light_hits[i - 1].position).normalize();
+			vec3 outDir;
+			float pdf_brdf;
+
+			if (rnd < diffProb) {
+				pdf_brdf = SampleDiffuse(light_hits[i].normal, inDir, outDir, state) * diffProb;
+				float cosTheta = dot(light_hits[i].normal, -inDir);
+				if (cosTheta < epsilon) break;
+				light_throughput[i] = (i == 0) 
+					? light_throughput[i] * light_hits[i].material->diffuseAlbedo / PI * cosTheta
+					: light_throughput[i - 1] * light_hits[i].material->diffuseAlbedo / PI * cosTheta;
+			} else {
+				pdf_brdf = SampleMirror(light_hits[i].normal, inDir, outDir) * mirrorProb;
+				float cosTheta = dot(light_hits[i].normal, -inDir);
+				if (cosTheta < epsilon) break;
+				light_throughput[i] = (i == 0) 
+					? light_throughput[i] * light_hits[i].material->mirrorAlbedo
+					: light_throughput[i - 1] * light_hits[i].material->mirrorAlbedo;
+			}
+
+			Ray bounce_ray(light_hits[i].position + light_hits[i].normal * epsilon, outDir);
+			Hit next_hit = firstIntersect(bounce_ray);
+			if (next_hit.t < 0) break;
+
+			light_hits[i + 1] = next_hit;
+			light_pdf[i + 1] = light_pdf[i] * pdf_brdf;
 		}
 
-		Hit light_paths_hits[maxdepth];
-		vec3 light_paths_radiance[maxdepth];
-		float light_paths_pdf[maxdepth];
-		light_paths_hits[0] = first_light_hit;
-		light_paths_radiance[0] = device_lights[light_idx].radianceAt(first_light_hit.position);
-		light_paths_pdf[0] = 1.0f / ((float)*device_lights_size) * 1.0f / (4.0f * PI);
-		
-		//make light paths
+		// CAMERA PATH
+
+		vec3 cam_throughput = vec3(1.0f, 1.0f, 1.0f);
+		float cam_pdf = 1.0f;
+		Ray cam_ray = _ray;
+
 		for (int i = 0; i < maxdepth; i++) {
+			Hit hit = firstIntersect(cam_ray);
+			if (hit.t < 0) break;
 
-			float diffuseSelectProb = light_paths_hits[i].material->diffuseAlbedo.average();
-			float mirrorSelectProb = light_paths_hits[i].material->mirrorAlbedo.average();
-			float rnd = Rand::random(state);	// Russian roulette to find diffuse, mirror or no reflection
+			//connect current path with the light source
+			vec3 light_pos = device_lights[0].location;
+			vec3 light_dir = (hit.position - light_pos).normalize();
+			float dist = (light_pos - hit.position).length();
 
-			if (rnd < diffuseSelectProb + mirrorSelectProb) {
-				vec3 lightDirIn = (i == 0) ?
-					light_source_out_dir :
-					(light_paths_hits[i].position - light_paths_hits[i - 1].position).normalize();
-				vec3 lightDirOut;
-				float pdf_brdf;
-
-				if (rnd < diffuseSelectProb) { // diffuse
-					pdf_brdf = SampleDiffuse(
-						light_paths_hits[i].normal,
-						lightDirIn,
-						lightDirOut,
-						state
-					) * diffuseSelectProb;
-					float cosThetaL = dot(light_paths_hits[i].normal, lightDirIn * (-1));
-					if (cosThetaL > epsilon) {
-						if (i == 0) {
-							light_paths_radiance[i] = light_paths_radiance[i] * (light_paths_hits[i].material->diffuseAlbedo) / PI * cosThetaL;
-						}
-						else {
-							light_paths_radiance[i] = light_paths_radiance[i - 1] * (light_paths_hits[i].material->diffuseAlbedo) / PI * cosThetaL;
-						}
-					}
-					else {
-						light_paths_hits[i].t = -1;
-						break;
-					}
-				}
-
-				else { // mirror
-					pdf_brdf = SampleMirror(
-						light_paths_hits[i].normal,
-						lightDirIn,
-						lightDirOut
-					)* mirrorSelectProb;
-					float cosThetaL = dot(light_paths_hits[i].normal, lightDirIn * (-1));
-					if (cosThetaL > epsilon) {
-						if (i == 0) {
-							light_paths_radiance[i] = light_paths_radiance[i] * (light_paths_hits[i].material->mirrorAlbedo);
-						}
-						else {
-							light_paths_radiance[i] = light_paths_radiance[i - 1] * (light_paths_hits[i].material->mirrorAlbedo);
-						}
-					}
-					else {
-						light_paths_hits[i].t = -1;
-						break;
-					}
-				}
-
-				//evaluate next hit
-				if (i != maxdepth - 1) {
-					light_paths_hits[i + 1] = firstIntersect(Ray(light_paths_hits[i].position + light_paths_hits[i].normal * epsilon, lightDirOut));
-					if (light_paths_hits[i + 1].t < 0) {
-						break;
-					}
-					else {
-						light_paths_pdf[i + 1] = light_paths_pdf[i] * pdf_brdf;
-					}
+			Hit shadow = firstIntersect(Ray(light_pos, light_dir));
+			if (shadow.t > 0 && (shadow.position - hit.position).length() < epsilon) {
+				vec3 light_radiance = device_lights[0].radianceAt(hit.position);
+				float cosTheta = dot(hit.normal, -light_dir);
+				if (cosTheta > epsilon) {
+					vec3 brdf = hit.material->diffuseAlbedo / PI;
+					vec3 contrib = (cam_throughput / cam_pdf) * (light_radiance * brdf * cosTheta);
+					outRad += contrib;
 				}
 			}
-			else {
+
+			//connect current path with every element of the light path
+			for (int j = 0; j < maxdepth; j++) {
+				if (light_hits[j].t < 0) break;
+
+				vec3 dir = (light_hits[j].position - hit.position).normalize();
+				float dist = (light_hits[j].position - hit.position).length();
+
+				//check if they can be connected
+				Hit shadow = firstIntersect(Ray(hit.position + hit.normal * epsilon, dir));
+				if (shadow.t < 0 || (shadow.position - light_hits[j].position).length() > epsilon) continue;
+
+				float cosCam = dot(hit.normal, dir);
+				float cosLight = dot(light_hits[j].normal, -dir);
+				if (cosCam < epsilon || cosLight < epsilon) continue;
+
+				float G = cosCam * cosLight / (dist * dist);
+				vec3 brdf = hit.material->diffuseAlbedo / PI;
+				vec3 camera_weight = cam_throughput * brdf * cosCam / cam_pdf;
+				vec3 light_weight = light_throughput[j] / light_pdf[j];
+
+				outRad += light_weight * G * camera_weight;
+			}
+
+			//get next element in camera path
+			float diffProb = hit.material->diffuseAlbedo.average();
+			float mirrorProb = hit.material->mirrorAlbedo.average();
+			float rnd = Rand::random(state);
+			vec3 outDir;
+
+			if (rnd < diffProb) {
+				float pdf = SampleDiffuse(hit.normal, cam_ray.dir, outDir, state);
+				float cosTheta = dot(hit.normal, outDir);
+				if (cosTheta < epsilon) break;
+				cam_throughput = cam_throughput * hit.material->diffuseAlbedo / PI * cosTheta;
+				cam_pdf = cam_pdf * pdf * diffProb;
+			} else if (rnd < diffProb + mirrorProb) {
+				float pdf = SampleMirror(hit.normal, cam_ray.dir, outDir);
+				cam_throughput = cam_throughput * hit.material->mirrorAlbedo;
+				cam_pdf = cam_pdf * pdf * mirrorProb;
+			} else {
 				break;
 			}
+
+			cam_ray = Ray(hit.position + hit.normal * epsilon, outDir);
 		}
 
-
-		vec3 paths_color[maxdepth * (maxdepth + 1)];
-		float paths_probability[maxdepth * (maxdepth + 1)];
-		int n_paths = 0;
-
-
-		vec3 pixel_path_brdf = vec3(1.0f, 1.0f, 1.0f);
-		float pixel_path_pdf = 1.0f;
-		Ray ray = _ray;
-
-		//make paths
-		for (int i = 0; i < maxdepth; i++) {
-			Hit hit = firstIntersect(ray);
-			if (hit.t < 0) {
-				//outRad += envMap.getPixelColor(ray.dir) * 6* pixel_path_weight;
-				break;
-				return outRad;
-			}
-			else {
-
-				//for (int i = 0; i < *device_lights_size; i++) {	// Direct light source computation
-				// vec3 outDir = device_lights[i].directionOf(hit.position);
-				//	Hit shadowHit = firstIntersect(Ray(hit.position + hit.normal * epsilon, outDir));
-				//	if (shadowHit.t < epsilon || shadowHit.t > device_lights[i].distanceOf(hit.position)) {	// if not in shadow
-				//		float cosThetaL = dot(hit.normal, outDir);
-				//		if (cosThetaL >= epsilon) {
-				//			outRad += hit.material->diffuseAlbedo / PI * cosThetaL
-				//				* device_lights[i].radianceAt(hit.position) * pixel_path_brdf /pixel_path_pdf;
-				//		}
-				//	}
-				//}
-
-
-				vec3 outDir_light = device_lights[light_idx].directionOf(hit.position);
-				Hit shadowHit = firstIntersect(Ray(hit.position + hit.normal * epsilon, outDir_light));
-				if (shadowHit.t < epsilon || shadowHit.t > device_lights[light_idx].distanceOf(hit.position)) {	// if not in shadow
-					float cosThetaL = dot(hit.normal, outDir_light);
-					if (cosThetaL >= epsilon) {
-						paths_color[n_paths] = device_lights[light_idx].radianceAt(hit.position)
-							* hit.material->diffuseAlbedo / PI * cosThetaL
-							* pixel_path_brdf
-							;
-						paths_probability[n_paths] = pixel_path_pdf;
-						n_paths++;
-					}
-				}
-
-
-				for (int j = 0; j<maxdepth; j++) {
-					if (light_paths_hits[j].t < 0) break;
-
-					Ray pixel_path_to_light_path = Ray(
-						hit.position + hit.normal * epsilon,
-						(light_paths_hits[j].position - hit.position).normalize()
-					);
-
-					Hit pixel_to_light_first_hit = firstIntersect(pixel_path_to_light_path);
-					bool clearView = pixel_to_light_first_hit.t > 0 && (pixel_to_light_first_hit.position - light_paths_hits[i].position).length() < epsilon;
-
-					if (clearView) {
-						float r = (light_paths_hits[j].position - hit.position).length();
-						float cosThetaInPixel = dot(hit.normal, pixel_path_to_light_path.dir);
-						float cosThetaInLight = dot(light_paths_hits[j].normal, pixel_path_to_light_path.dir * (-1.0));
-						if (cosThetaInPixel < epsilon) {
-							continue;
-						}
-						vec3 brdf_pixel = (hit.material->diffuseAlbedo) / PI * cosThetaInPixel;
-
-						paths_color[n_paths] = light_paths_radiance[j]
-							* brdf_pixel
-							* cosThetaInPixel
-							//* 1.0 / (r * r)
-							* pixel_path_brdf
-							;
-						paths_probability[n_paths] = 1;// pixel_path_pdf* light_paths_pdf[j];
-						n_paths++;
-					}
-
-				}
-
-				float diffuseSelectProb = hit.material->diffuseAlbedo.average();
-				float mirrorSelectProb = hit.material->mirrorAlbedo.average();
-
-				float rnd = Rand::random(state);	// Russian roulette to find diffuse, mirror or no reflection
-				vec3 outDir;
-				if (rnd < diffuseSelectProb) { // diffuse
-					float pdf = SampleDiffuse(hit.normal, ray.dir, outDir, state);
-					float cosThetaL = dot(hit.normal, outDir);
-					if (cosThetaL >= epsilon) {
-						pixel_path_brdf = pixel_path_brdf * (hit.material->diffuseAlbedo) / PI * cosThetaL; //brdf
-						pixel_path_pdf = pixel_path_pdf * pdf * diffuseSelectProb; //pdf
-					}
-					else {
-						break;
-					}
-				}
-				else if (rnd < diffuseSelectProb + mirrorSelectProb) { // mirror
-					float pdf = SampleMirror(hit.normal, ray.dir, outDir);
-					pixel_path_brdf = pixel_path_brdf * hit.material->mirrorAlbedo; //brdf
-					pixel_path_pdf = pixel_path_pdf * pdf * mirrorSelectProb; //pdf
-				}
-				else {
-					break;
-				}
-
-				ray = Ray(hit.position + hit.normal * epsilon, outDir);
-			}
-		}
-
-		if (n_paths != 0) {
-			float sum_probability = 0;
-			for (int i = 0; i < n_paths; i++) {
-				sum_probability += paths_probability[i];
-			}
-			//return vec3(sum_probability, sum_probability, sum_probability);
-			for (int i = 0; i < n_paths; i++) {
-				outRad += paths_color[i] / paths_probability[i];// / n_paths;// sum_probability;
-			}
-		}
 		return outRad;
 	}
 };

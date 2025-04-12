@@ -1,6 +1,6 @@
 #pragma once
 
-#include "HDRLoader/HDRLoader.h"
+#include "HDRLoader/HDRLoader.cuh"
 #include "copyToDevice/copyToDevice.h"
 #include "math/math.cuh"
 #include <string>
