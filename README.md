@@ -24,8 +24,6 @@ An environment map consists of 6 HDR images arranged in a cube formation. The sc
 
 <div style="display: flex; flex-direction: column; align-items: center;">
     <img src="img/environment_mapping.png" width="50%" alt="environment mapping example">
-    <p style="text-align: center; padding: 0 10px;">
-    </p>
 </div>
 
 
@@ -35,8 +33,5 @@ A k-d tree sorts the triangles of a mesh object into a binary tree of bounding b
 With this method, at each step we can roughly halve the number of triangles we are still considering as possible intersection points.
 <div style="display: flex; flex-direction: column; align-items: center;">
     <img src="img/kd_tree.png" width="50%" alt="K-d tree visualization">
-    <p style="text-align: center; padding: 0 10px;">
-        <small><b>K-d tree visualization</b></small>
-    </p>
 </div>
 
